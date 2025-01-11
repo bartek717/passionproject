@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@/utils/supabase/client';
-import { createClass, getClasses } from './actions';
+import { createClass, getClasses, deleteClass, deleteDocument, addDocumentsToClass } from './actions';
 
 interface Document {
   id: string;
@@ -27,6 +27,8 @@ export default function ClassesPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingClass, setEditingClass] = useState<Class | null>(null);
+  const [loadingDocuments, setLoadingDocuments] = useState<{ [key: string]: boolean }>({});
 
   useEffect(() => {
     loadClasses();
@@ -66,6 +68,10 @@ export default function ClassesPage() {
         setNewClassName('');
         setFiles([]);
         await loadClasses();
+        const newClass = (await getClasses()).data?.find(c => c.id === result.classId);
+        if (newClass) {
+          setSelectedClass(newClass);
+        }
       } else {
         setError(result.error || 'Failed to create class');
       }
@@ -73,6 +79,85 @@ export default function ClassesPage() {
       setError('Failed to create class');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteClass = async (classId: string) => {
+    if (!confirm('Are you sure you want to delete this class?')) return;
+    
+    setIsLoading(true);
+    const result = await deleteClass(classId);
+    if (result.success) {
+      setSelectedClass(null);
+      setEditingClass(null);
+      await loadClasses();
+    } else {
+      setError(result.error || 'Failed to delete class');
+    }
+    setIsLoading(false);
+  };
+
+  const handleDeleteDocument = async (documentId: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) return;
+    
+    setLoadingDocuments(prev => ({ ...prev, [documentId]: true }));
+    
+    try {
+      const result = await deleteDocument(documentId);
+      if (result.success) {
+        const updatedClasses = await getClasses();
+        if (updatedClasses.success && updatedClasses.data) {
+          const updatedClass = updatedClasses.data.find(c => c.id === editingClass?.id);
+          if (updatedClass) {
+            setEditingClass(updatedClass);
+            if (selectedClass?.id === editingClass?.id) {
+              setSelectedClass(updatedClass);
+            }
+            setClasses(updatedClasses.data);
+          }
+        }
+      } else {
+        setError(result.error || 'Failed to delete document');
+      }
+    } finally {
+      setLoadingDocuments(prev => {
+        const newState = { ...prev };
+        delete newState[documentId];
+        return newState;
+      });
+    }
+  };
+
+  const handleAddDocuments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!editingClass || !e.target.files?.length) return;
+    
+    const uploadId = 'upload-' + Date.now();
+    setLoadingDocuments(prev => ({ ...prev, [uploadId]: true }));
+    
+    try {
+      const files = Array.from(e.target.files);
+      const result = await addDocumentsToClass(editingClass.id, files);
+      if (result.success) {
+        const updatedClasses = await getClasses();
+        if (updatedClasses.success && updatedClasses.data) {
+          const updatedClass = updatedClasses.data.find(c => c.id === editingClass.id);
+          if (updatedClass) {
+            setEditingClass(updatedClass);
+            if (selectedClass?.id === editingClass.id) {
+              setSelectedClass(updatedClass);
+            }
+            setClasses(updatedClasses.data);
+          }
+        }
+      } else {
+        setError(result.error || 'Failed to add documents');
+      }
+    } finally {
+      setLoadingDocuments(prev => {
+        const newState = { ...prev };
+        delete newState[uploadId];
+        return newState;
+      });
     }
   };
 
@@ -89,12 +174,12 @@ export default function ClassesPage() {
           </div>
         ) : (
           <div className="flex flex-col h-full">
+            <div className="p-4 border-b border-gray-700">
+              <h2 className="text-xl font-semibold text-white">{selectedClass.name}</h2>
+            </div>
+
             <div className="flex-1 p-4 overflow-y-auto">
               {/* Chat messages will go here */}
-            </div>
-            
-            <div className="border-t border-gray-700 p-4 bg-gray-800">
-              <h3 className="font-semibold text-gray-300 mb-2">Related Content</h3>
             </div>
 
             <div className="border-t border-gray-700 p-4">
@@ -136,21 +221,119 @@ export default function ClassesPage() {
 
         <div className="space-y-2">
           {classes.map((cls) => (
-            <button
+            <div
               key={cls.id}
-              onClick={() => setSelectedClass(cls)}
-              className={`w-full text-left p-3 rounded-lg transition-colors ${
-                selectedClass?.id === cls.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-700'
-              }`}
+              className="relative group"
             >
-              <h3 className="font-medium">{cls.name}</h3>
-              <p className="text-sm text-gray-400">{cls.description}</p>
-            </button>
+              <button
+                onClick={() => setSelectedClass(cls)}
+                className={`w-full text-left p-3 rounded-lg transition-colors ${
+                  selectedClass?.id === cls.id
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                <h3 className="font-medium">{cls.name}</h3>
+                <p className="text-sm text-gray-400">{cls.description}</p>
+              </button>
+              
+              {/* Edit button that appears on hover */}
+              <button
+                onClick={() => setEditingClass(cls)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
+              >
+                Edit
+              </button>
+            </div>
           ))}
         </div>
       </div>
+
+      {/* Edit Class Modal */}
+      {editingClass && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-semibold text-white">{editingClass.name}</h2>
+              <button
+                onClick={() => setEditingClass(null)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Documents Section */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-medium text-white">Documents</h3>
+                  <label className="cursor-pointer px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
+                    Add Files
+                    <input
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept=".pdf,.doc,.docx,.ppt,.pptx"
+                      onChange={(e) => {
+                        handleAddDocuments(e);
+                        e.target.value = '';
+                      }}
+                      disabled={isLoading}
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  {editingClass.documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between p-2 bg-gray-700 rounded"
+                    >
+                      <span className="text-gray-300">{doc.name}</span>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/documents/${doc.file_path}`)}
+                          className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          className="px-2 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={loadingDocuments[doc.id]}
+                        >
+                          {loadingDocuments[doc.id] ? (
+                            <span className="inline-block animate-spin">↻</span>
+                          ) : (
+                            'Delete'
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {Object.keys(loadingDocuments).some(key => key.startsWith('upload-')) && (
+                    <div className="flex items-center justify-center p-4">
+                      <span className="inline-block animate-spin text-blue-500 text-2xl">↻</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Delete Class Button */}
+              <div className="pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => handleDeleteClass(editingClass.id)}
+                  className="w-full px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+                  disabled={isLoading}
+                >
+                  Delete Class
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Class Modal */}
       {isModalOpen && (
