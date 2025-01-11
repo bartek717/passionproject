@@ -34,10 +34,12 @@ export default function ClassesPage() {
 
   const loadClasses = async () => {
     const result = await getClasses();
-    if (result.success) {
+    if (result.success && result.data) {
       setClasses(result.data);
+      setError(null);
     } else {
-      setError(result.error);
+      setClasses([]);
+      setError(result.error || 'Failed to load classes');
     }
   };
 
@@ -63,9 +65,9 @@ export default function ClassesPage() {
         setModalOpen(false);
         setNewClassName('');
         setFiles([]);
-        await loadClasses(); // Reload classes
+        await loadClasses();
       } else {
-        setError(result.error);
+        setError(result.error || 'Failed to create class');
       }
     } catch (err) {
       setError('Failed to create class');

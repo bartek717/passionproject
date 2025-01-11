@@ -79,9 +79,9 @@ export async function getClasses() {
       `);
 
     if (error) throw error;
-    return { success: true, data };
+    return { success: true, data, error: null };
   } catch (error) {
     console.error('Error fetching classes:', error);
-    return { success: false, error: 'Failed to fetch classes' };
+    return { success: false, data: null, error: 'Failed to fetch classes' };
   }
 } 
