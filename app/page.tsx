@@ -1,6 +1,13 @@
+import { createClient } from '@/utils/supabase/server';
 import { redirect } from 'next/navigation';
 
-// use later for home page and links to login page
-export default function Home() {
-  redirect('/login');
+export default async function Home() {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    redirect('/login');
+  } else {
+    redirect('/classes');
+  }
 }
